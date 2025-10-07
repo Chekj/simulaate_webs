@@ -2,6 +2,8 @@
 
 # Simulated WebSocket Implementation Script
 # This script automates the implementation of simulated WebSocket functionality for OpenAlgo analyzer mode
+# chmod +x simulated_websocket.sh
+# ./simulated_websocket.sh
 
 set -e  # Exit on any error
 

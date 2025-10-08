@@ -3,6 +3,8 @@
 # simulated_websocket.sh - One-click installation script for simulated WebSocket data in OpenAlgo
 # This script automatically installs and configures the simulated WebSocket feature
 # for OpenAlgo analyzer mode in a fresh clone from GitHub.
+# sudo chmod +x simulated_websocket2.sh
+# sudo ./simulated_websocket2.sh
 
 set -e  # Exit on any error
 

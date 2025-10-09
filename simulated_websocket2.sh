@@ -1,15 +1,13 @@
 #!/bin/bash
 
-# simulated_websocket.sh - One-click installation script for simulated WebSocket data in OpenAlgo
+# fixed_simulated_websocket2.sh - Fixed installation script for simulated WebSocket data in OpenAlgo
 # This script automatically installs and configures the simulated WebSocket feature
 # for OpenAlgo analyzer mode in a fresh clone from GitHub.
-# sudo chmod +x simulated_websocket2.sh
-# sudo ./simulated_websocket2.sh
 
 set -e  # Exit on any error
 
 echo "=========================================="
-echo "OpenAlgo Simulated WebSocket Implementation"
+echo "OpenAlgo Simulated WebSocket Implementation (FIXED VERSION)"
 echo "=========================================="
 echo
 
@@ -370,121 +368,99 @@ EOF
 
 echo "✓ Created websocket_proxy/simulated_adapter.py"
 
-# Modify the broker factory to include the simulated adapter
+# Modify the broker factory to include the simulated adapter while preserving existing functionality
 echo "Updating broker factory..."
+# First, backup the original file
+cp websocket_proxy/broker_factory.py websocket_proxy/broker_factory.py.bak
+
+# Create the modified broker factory
 cat > websocket_proxy/broker_factory.py << 'EOF'
-import os
-from typing import Type, Dict, Optional
+import importlib
+from typing import Dict, Type, Optional
+
 from .base_adapter import BaseBrokerWebSocketAdapter
+from utils.logging import get_logger
 
-# Import all broker adapters
-try:
-    from broker.angel.websocket import AngelWebSocketAdapter
-except ImportError:
-    AngelWebSocketAdapter = None
-
-try:
-    from broker.zerodha.websocket import ZerodhaWebSocketAdapter
-except ImportError:
-    ZerodhaWebSocketAdapter = None
-
-try:
-    from broker.fivepaisaxts.websocket import FivePaisaXtsWebSocketAdapter
-except ImportError:
-    FivePaisaXtsWebSocketAdapter = None
-
-try:
-    from broker.aliceblue.websocket import AliceBlueWebSocketAdapter
-except ImportError:
-    AliceBlueWebSocketAdapter = None
-
-try:
-    from broker.dhan.websocket import DhanWebSocketAdapter
-except ImportError:
-    DhanWebSocketAdapter = None
-
-try:
-    from broker.flattrade.websocket import FlattradeWebSocketAdapter
-except ImportError:
-    FlattradeWebSocketAdapter = None
-
-try:
-    from broker.shoonya.websocket import ShoonyaWebSocketAdapter
-except ImportError:
-    ShoonyaWebSocketAdapter = None
-
-try:
-    from broker.upstox.websocket import UpstoxWebSocketAdapter
-except ImportError:
-    UpstoxWebSocketAdapter = None
-
-try:
-    from broker.compositedge.websocket import CompositeEdgeWebSocketAdapter
-except ImportError:
-    CompositeEdgeWebSocketAdapter = None
-
-try:
-    from broker.iifl.websocket import IIFLWebSocketAdapter
-except ImportError:
-    IIFLWebSocketAdapter = None
-
-try:
-    from broker.ibulls.websocket import IBullsWebSocketAdapter
-except ImportError:
-    IBullsWebSocketAdapter = None
-
-try:
-    from broker.wisdom.websocket import WisdomWebSocketAdapter
-except ImportError:
-    WisdomWebSocketAdapter = None
-
-# Import simulated adapter for analyzer mode
-from .simulated_adapter import SimulatedWebSocketAdapter
+logger = get_logger(__name__)
 
 # Registry of all supported broker adapters
-BROKER_ADAPTERS: Dict[str, Type[BaseBrokerWebSocketAdapter]] = {
-    'simulated': SimulatedWebSocketAdapter
-}
+BROKER_ADAPTERS: Dict[str, Type[BaseBrokerWebSocketAdapter]] = {}
 
-# Add available broker adapters
-if AngelWebSocketAdapter:
-    BROKER_ADAPTERS['angel'] = AngelWebSocketAdapter
-if ZerodhaWebSocketAdapter:
-    BROKER_ADAPTERS['zerodha'] = ZerodhaWebSocketAdapter
-if FivePaisaXtsWebSocketAdapter:
-    BROKER_ADAPTERS['fivepaisaxts'] = FivePaisaXtsWebSocketAdapter
-if AliceBlueWebSocketAdapter:
-    BROKER_ADAPTERS['aliceblue'] = AliceBlueWebSocketAdapter
-if DhanWebSocketAdapter:
-    BROKER_ADAPTERS['dhan'] = DhanWebSocketAdapter
-if FlattradeWebSocketAdapter:
-    BROKER_ADAPTERS['flattrade'] = FlattradeWebSocketAdapter
-if ShoonyaWebSocketAdapter:
-    BROKER_ADAPTERS['shoonya'] = ShoonyaWebSocketAdapter
-if UpstoxWebSocketAdapter:
-    BROKER_ADAPTERS['upstox'] = UpstoxWebSocketAdapter
-if CompositeEdgeWebSocketAdapter:
-    BROKER_ADAPTERS['compositedge'] = CompositeEdgeWebSocketAdapter
-if IIFLWebSocketAdapter:
-    BROKER_ADAPTERS['iifl'] = IIFLWebSocketAdapter
-if IBullsWebSocketAdapter:
-    BROKER_ADAPTERS['ibulls'] = IBullsWebSocketAdapter
-if WisdomWebSocketAdapter:
-    BROKER_ADAPTERS['wisdom'] = WisdomWebSocketAdapter
-
-def create_broker_adapter(broker_name: str) -> Optional[BaseBrokerWebSocketAdapter]:
+def register_adapter(broker_name: str, adapter_class: Type[BaseBrokerWebSocketAdapter]) -> None:
     """
-    Factory function to create broker WebSocket adapter instances
+    Register a broker adapter class for a specific broker
     
     Args:
         broker_name: Name of the broker
+        adapter_class: Class that implements the BaseBrokerWebSocketAdapter interface
+    """
+    BROKER_ADAPTERS[broker_name.lower()] = adapter_class
+
+# Import simulated adapter for analyzer mode
+from .simulated_adapter import SimulatedWebSocketAdapter
+# Register the simulated adapter
+register_adapter('simulated', SimulatedWebSocketAdapter)
+
+def create_broker_adapter(broker_name: str) -> Optional[BaseBrokerWebSocketAdapter]:
+    """
+    Create an instance of the appropriate broker adapter
+    
+    Args:
+        broker_name: Name of the broker (e.g., 'angel', 'zerodha')
         
     Returns:
-        Instance of the appropriate broker adapter, or None if not found
+        BaseBrokerWebSocketAdapter: An instance of the appropriate broker adapter
+        
+    Raises:
+        ValueError: If the broker is not supported
     """
-    adapter_class = BROKER_ADAPTERS.get(broker_name.lower())
-    if adapter_class:
-        return adapter_class()
+    broker_name = broker_name.lower()
+    
+    # Check if adapter is registered
+    if broker_name in BROKER_ADAPTERS:
+        logger.info(f"Creating adapter for broker: {broker_name}")
+        return BROKER_ADAPTERS[broker_name]()
+    
+    # Try dynamic import if not registered
+    try:
+        # Try to import from broker-specific directory first
+        module_name = f"broker.{broker_name}.streaming.{broker_name}_adapter"
+        class_name = f"{broker_name.capitalize()}WebSocketAdapter"
+        
+        try:
+            # Import the module
+            module = importlib.import_module(module_name)
+            
+            # Get the adapter class
+            adapter_class = getattr(module, class_name)
+            
+            # Register the adapter for future use
+            register_adapter(broker_name, adapter_class)
+            
+            # Create and return an instance
+            return adapter_class()
+        except (ImportError, AttributeError) as e:
+            logger.warning(f"Could not import from broker-specific path: {e}")
+            
+            # Try websocket_proxy directory as fallback
+            module_name = f"websocket_proxy.{broker_name}_adapter"
+            
+            # Import the module
+            module = importlib.import_module(module_name)
+            
+            # Get the adapter class
+            adapter_class = getattr(module, class_name)
+            
+            # Register the adapter for future use
+            register_adapter(broker_name, adapter_class)
+            
+            # Create and return an instance
+            return adapter_class()
+    
+    except (ImportError, AttributeError) as e:
+        logger.exception(f"Failed to load adapter for broker {broker_name}: {e}")
+        raise ValueError(f"Unsupported broker: {broker_name}. No adapter available.")
+    
     return None
 EOF
 
@@ -493,7 +469,7 @@ echo "✓ Updated websocket_proxy/broker_factory.py"
 # Modify the WebSocket proxy server to support analyzer mode
 echo "Updating WebSocket proxy server..."
 # First, let's backup the original file
-cp websocket_proxy/server.py websocket_proxy/server.py.bak
+cp websocket_proxy/server.py websocket_proxy/server_fixed.py.bak
 
 # Create a temporary file with the modifications
 cat > websocket_proxy/server_temp.py << 'EOF'
@@ -1524,6 +1500,21 @@ async def main():
     except RuntimeError as e:
         if "set_wakeup_fd only works in main thread" in str(e):
             logger.error(f"Error in start method: {e}")
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Server error: {e}\n{error_details}")
+        raise
+    finally:
+        # Always clean up resources
+        if proxy:
+            try:
+                await proxy.stop()
+            except Exception as cleanup_error:
+                logger.error(f"Error during cleanup: {cleanup_error}")
+
+if __name__ == "__main__":
+    aio.run(main())
 EOF
 
 # Replace the original server.py with the modified version
@@ -1557,7 +1548,7 @@ def test_installation():
     if os.path.exists('websocket_proxy/broker_factory.py'):
         with open('websocket_proxy/broker_factory.py', 'r') as f:
             content = f.read()
-            if "'simulated': SimulatedWebSocketAdapter" in content:
+            if "'simulated': SimulatedWebSocketAdapter" in content or "SimulatedWebSocketAdapter" in content:
                 print("✓ Broker factory includes simulated adapter")
             else:
                 print("✗ Broker factory does NOT include simulated adapter")
@@ -1611,7 +1602,7 @@ echo "The simulated WebSocket feature has been successfully installed."
 echo
 echo "What was installed:"
 echo "  ✓ websocket_proxy/simulated_adapter.py - Simulated WebSocket adapter"
-echo "  ✓ websocket_proxy/broker_factory.py - Updated broker factory"
+echo "  ✓ websocket_proxy/broker_factory.py - Updated broker factory (preserving existing functionality)"
 echo "  ✓ websocket_proxy/server.py - Modified WebSocket proxy server"
 echo "  ✓ test_simulated_websocket_installation.py - Verification script"
 echo

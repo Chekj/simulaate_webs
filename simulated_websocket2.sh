@@ -1,13 +1,15 @@
 #!/bin/bash
 
-# fixed_simulated_websocket2.sh - Fixed installation script for simulated WebSocket data in OpenAlgo
+# simulated_websocket_fixed.sh - Fixed installation script for simulated WebSocket data in OpenAlgo
 # This script automatically installs and configures the simulated WebSocket feature
 # for OpenAlgo analyzer mode in a fresh clone from GitHub.
+# sudo chmod +x simulated_websocket2_fixed.sh
+# sudo ./simulated_websocket2_fixed.sh
 
 set -e  # Exit on any error
 
 echo "=========================================="
-echo "OpenAlgo Simulated WebSocket Implementation (FIXED VERSION)"
+echo "OpenAlgo Simulated WebSocket Implementation (FIXED)"
 echo "=========================================="
 echo
 
@@ -368,12 +370,8 @@ EOF
 
 echo "✓ Created websocket_proxy/simulated_adapter.py"
 
-# Modify the broker factory to include the simulated adapter while preserving existing functionality
+# Modify the broker factory to include the simulated adapter
 echo "Updating broker factory..."
-# First, backup the original file
-cp websocket_proxy/broker_factory.py websocket_proxy/broker_factory.py.bak
-
-# Create the modified broker factory
 cat > websocket_proxy/broker_factory.py << 'EOF'
 import importlib
 from typing import Dict, Type, Optional
@@ -386,6 +384,14 @@ logger = get_logger(__name__)
 # Registry of all supported broker adapters
 BROKER_ADAPTERS: Dict[str, Type[BaseBrokerWebSocketAdapter]] = {}
 
+# Import simulated adapter for analyzer mode
+try:
+    from .simulated_adapter import SimulatedWebSocketAdapter
+    BROKER_ADAPTERS['simulated'] = SimulatedWebSocketAdapter
+    logger.info("Simulated WebSocket adapter registered")
+except ImportError as e:
+    logger.warning(f"Could not import simulated adapter: {e}")
+
 def register_adapter(broker_name: str, adapter_class: Type[BaseBrokerWebSocketAdapter]) -> None:
     """
     Register a broker adapter class for a specific broker
@@ -395,11 +401,7 @@ def register_adapter(broker_name: str, adapter_class: Type[BaseBrokerWebSocketAd
         adapter_class: Class that implements the BaseBrokerWebSocketAdapter interface
     """
     BROKER_ADAPTERS[broker_name.lower()] = adapter_class
-
-# Import simulated adapter for analyzer mode
-from .simulated_adapter import SimulatedWebSocketAdapter
-# Register the simulated adapter
-register_adapter('simulated', SimulatedWebSocketAdapter)
+    
 
 def create_broker_adapter(broker_name: str) -> Optional[BaseBrokerWebSocketAdapter]:
     """
@@ -469,7 +471,7 @@ echo "✓ Updated websocket_proxy/broker_factory.py"
 # Modify the WebSocket proxy server to support analyzer mode
 echo "Updating WebSocket proxy server..."
 # First, let's backup the original file
-cp websocket_proxy/server.py websocket_proxy/server_fixed.py.bak
+cp websocket_proxy/server.py websocket_proxy/server.py.bak
 
 # Create a temporary file with the modifications
 cat > websocket_proxy/server_temp.py << 'EOF'
@@ -666,11 +668,11 @@ class WebSocketProxy:
             # Wait for all connections to close with timeout
             if close_tasks:
                 try:
-                    await asyncio.wait_for(
-                        asyncio.gather(*close_tasks, return_exceptions=True),
+                    await aio.wait_for(
+                        aio.gather(*close_tasks, return_exceptions=True),
                         timeout=2.0  # 2 second timeout
                     )
-                except asyncio.TimeoutError:
+                except aio.TimeoutError:
                     logger.warning("Timeout waiting for client connections to close")
             
             # Disconnect all broker adapters
@@ -1500,21 +1502,6 @@ async def main():
     except RuntimeError as e:
         if "set_wakeup_fd only works in main thread" in str(e):
             logger.error(f"Error in start method: {e}")
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        logger.error(f"Server error: {e}\n{error_details}")
-        raise
-    finally:
-        # Always clean up resources
-        if proxy:
-            try:
-                await proxy.stop()
-            except Exception as cleanup_error:
-                logger.error(f"Error during cleanup: {cleanup_error}")
-
-if __name__ == "__main__":
-    aio.run(main())
 EOF
 
 # Replace the original server.py with the modified version
@@ -1548,7 +1535,7 @@ def test_installation():
     if os.path.exists('websocket_proxy/broker_factory.py'):
         with open('websocket_proxy/broker_factory.py', 'r') as f:
             content = f.read()
-            if "'simulated': SimulatedWebSocketAdapter" in content or "SimulatedWebSocketAdapter" in content:
+            if "'simulated': SimulatedWebSocketAdapter" in content:
                 print("✓ Broker factory includes simulated adapter")
             else:
                 print("✗ Broker factory does NOT include simulated adapter")
@@ -1593,18 +1580,118 @@ echo "✓ Created test_simulated_websocket_installation.py"
 # Make the test script executable
 chmod +x test_simulated_websocket_installation.py
 
+# Create a cleanup script to properly handle server restarts
+echo "Creating cleanup script..."
+cat > cleanup_websocket_processes.sh << 'EOF'
+#!/bin/bash
+
+# Script to clean up any existing WebSocket processes before starting
+echo "Cleaning up existing WebSocket processes..."
+
+# Kill any existing WebSocket proxy processes
+WEBSOCKET_PIDS=$(ps aux | grep "websocket_proxy.server" | grep -v grep | awk '{print $2}')
+if [ ! -z "$WEBSOCKET_PIDS" ]; then
+    echo "Killing existing WebSocket processes: $WEBSOCKET_PIDS"
+    kill $WEBSOCKET_PIDS 2>/dev/null
+    sleep 2
+fi
+
+# Kill any processes using port 8765
+PORT_PIDS=$(lsof -ti:8765 2>/dev/null)
+if [ ! -z "$PORT_PIDS" ]; then
+    echo "Killing processes using port 8765: $PORT_PIDS"
+    kill $PORT_PIDS 2>/dev/null
+    sleep 2
+fi
+
+echo "Cleanup completed."
+EOF
+
+echo "✓ Created cleanup_websocket_processes.sh"
+chmod +x cleanup_websocket_processes.sh
+
+# Update the start.sh script to include proper cleanup
+echo "Updating start.sh script..."
+cat > start.sh.updated << 'EOF'
+#!/bin/bash
+
+echo "[OpenAlgo] Starting up..."
+
+# Try to create directories, but don't fail if they already exist or can't be created
+# This handles both mounted volumes and permission issues
+for dir in db log log/strategies strategies strategies/scripts keys; do
+    mkdir -p "$dir" 2>/dev/null || true
+done
+
+# Try to set permissions if possible, but continue regardless
+# This will work for local directories but skip for mounted volumes
+if [ -w "." ]; then
+    # Set more permissive permissions for directories
+    chmod -R 755 db log strategies 2>/dev/null || echo "⚠️  Skipping chmod (may be mounted volume or permission restricted)"
+    # Set restrictive permissions for keys directory (only owner can access)
+    chmod 700 keys 2>/dev/null || true
+else
+    echo "⚠️  Running with restricted permissions (mounted volume detected)"
+fi
+
+# Ensure Python can create directories at runtime if needed
+export PYTHONDONTWRITEBYTECODE=1
+
+cd /app
+
+# Clean up any existing WebSocket processes
+echo "[OpenAlgo] Cleaning up existing WebSocket processes..."
+./cleanup_websocket_processes.sh
+
+# Start WebSocket proxy server in background
+echo "[OpenAlgo] Starting WebSocket proxy server on port 8765..."
+/app/.venv/bin/python -m websocket_proxy.server &
+WEBSOCKET_PID=$!
+echo "[OpenAlgo] WebSocket proxy server started with PID $WEBSOCKET_PID"
+
+# Function to cleanup on exit
+cleanup() {
+    echo "[OpenAlgo] Shutting down..."
+    if [ ! -z "$WEBSOCKET_PID" ]; then
+        kill $WEBSOCKET_PID 2>/dev/null
+    fi
+    exit 0
+}
+
+# Set up signal handlers
+trap cleanup SIGTERM SIGINT
+
+# Run main application with gunicorn using eventlet for WebSocket support
+echo "[OpenAlgo] Starting application on port 5000 with eventlet..."
+exec /app/.venv/bin/gunicorn \
+    --worker-class eventlet \
+    --workers 1 \
+    --bind 0.0.0.0:5000 \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    --log-level warning \
+    app:app
+EOF
+
+# Replace the original start.sh with the updated version
+mv start.sh.updated start.sh
+chmod +x start.sh
+echo "✓ Updated start.sh"
+
 echo
 echo "=========================================="
 echo "Installation Complete!"
 echo "=========================================="
 echo
-echo "The simulated WebSocket feature has been successfully installed."
+echo "The simulated WebSocket feature has been successfully installed with fixes."
 echo
 echo "What was installed:"
 echo "  ✓ websocket_proxy/simulated_adapter.py - Simulated WebSocket adapter"
-echo "  ✓ websocket_proxy/broker_factory.py - Updated broker factory (preserving existing functionality)"
+echo "  ✓ websocket_proxy/broker_factory.py - Updated broker factory"
 echo "  ✓ websocket_proxy/server.py - Modified WebSocket proxy server"
 echo "  ✓ test_simulated_websocket_installation.py - Verification script"
+echo "  ✓ cleanup_websocket_processes.sh - Cleanup script for proper restarts"
+echo "  ✓ start.sh - Updated startup script with proper cleanup"
 echo
 echo "To verify the installation, run:"
 echo "  python3 test_simulated_websocket_installation.py"
@@ -1620,5 +1707,7 @@ echo "  • Quote (OHLC) mode"
 echo "  • Depth (Market Depth) mode"
 echo "  • Realistic price and volume simulation"
 echo "  • Thread-safe operation"
+echo "  • Proper cleanup on server restarts"
 echo
 echo "Enjoy safe testing with simulated market data!"
+EOF

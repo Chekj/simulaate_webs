@@ -265,7 +265,7 @@ class SimulatedWebSocketAdapter(BaseBrokerWebSocketAdapter):
             "exchange": symbol_info["exchange"],
             "ltp": new_price,
             "volume": new_volume,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)
         }
     
     def _generate_quote_data(self, symbol_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -313,7 +313,7 @@ class SimulatedWebSocketAdapter(BaseBrokerWebSocketAdapter):
             "close": round(close_price, 2),
             "last_trade_quantity": random.randint(1, 1000),
             "avg_trade_price": round((open_price + ltp) / 2, 2),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)
         }
     
     def _generate_depth_data(self, symbol_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -364,7 +364,7 @@ class SimulatedWebSocketAdapter(BaseBrokerWebSocketAdapter):
                 "buy": buy_levels,
                 "sell": sell_levels
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)
         }
 EOF
 
